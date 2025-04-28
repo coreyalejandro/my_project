@@ -107,6 +107,7 @@ separator()
 # 7. MONTHLY SALES TREND (Range Slider & Selectors)
 text("## Monthly Sales Trend")
 monthly_df = filtered.groupby("Month").agg(Sales=("Sales","sum")).reset_index()
+monthly_df["Month"] = monthly_df["Month"].dt.strftime("%Y-%m")
 fig_month = px.line(
     monthly_df,
     x="Month",
@@ -117,13 +118,7 @@ fig_month = px.line(
 fig_month.update_layout(
     template="plotly_white",
     xaxis=dict(
-        rangeselector=dict(buttons=[
-            dict(count=3, label="3m", step="month", stepmode="backward"),
-            dict(count=6, label="6m", step="month", stepmode="backward"),
-            dict(step="all")
-        ]),
-        rangeslider=dict(visible=True),
-        type="date"
+        type="category"
     ),
     yaxis_title="Sales ($)"
 )
