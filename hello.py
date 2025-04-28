@@ -6,7 +6,7 @@ import plotly.graph_objects as go
 text('# Assortment Overview Dashboard')
 
 # Load the CSV
-df = pd.read_csv('data/sample_first100.csv')
+df = pd.read_csv('data/my_sample_superstore.csv')
 table(df, title='Original Data')
 
 # 1. Sales & Margin Performance by Sub Category (Scatter Plot)
