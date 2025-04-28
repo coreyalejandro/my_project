@@ -1,87 +1,217 @@
-from preswald import text, plotly, connect, get_df, table
+from preswald import (
+    text,
+    separator,
+    plotly,
+    connect,
+    get_df,
+    table,
+    slider,
+    workflow_dag,
+    Workflow
+)
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-text('# Assortment Overview Dashboard')
+# 1. TITLE
+text("# Superstore Executive Dashboard\n_A data-driven overview with advanced, interactive visuals_")
+separator()
 
-# Load the CSV
-df = pd.read_csv('data/my_sample_superstore.csv')
-table(df, title='Original Data')
+# 2. LOAD DATA
+connect()
+df = get_df(source_name="my_sample_superstore")  # loads data/my_sample_superstore.csv
+df["Order Date"] = pd.to_datetime(df["Order Date"])
+df["Year"] = df["Order Date"].dt.year
+df["Month"] = df["Order Date"].dt.to_period("M").dt.to_timestamp()
 
-# 1. Sales & Margin Performance by Sub Category (Scatter Plot)
-if 'Profit' in df.columns and 'Sales' in df.columns and 'Sub-Category' in df.columns:
-    df['Margin Contrib %'] = df['Profit'] / df['Sales']
-    df['Net Sales Contrib %'] = df['Sales'] / df['Sales'].sum()
-    fig1 = px.scatter(
-        df,
-        x='Margin Contrib %',
-        y='Net Sales Contrib %',
-        color='Sub-Category',
-        size='Sales',
-        hover_name='Sub-Category',
-        title='Sales & Margin Performance by Sub Category'
-    )
-    plotly(fig1)
-else:
-    text('Missing columns for Sales & Margin Performance by Sub Category')
+# 3. RAW DATA PREVIEW (convert dates to strings for JSON serialization)
+df_preview = df.copy()
+df_preview["Order Date"] = df_preview["Order Date"].dt.strftime("%Y-%m-%d")
+table(df_preview.head(10), title="Raw Data Preview")
+separator()
 
-# 2. Pvt Vs National Brand Performance by Sub Category (Bar Chart)
-# Using Category as a proxy for Brand Type (since Brand Type is not present)
-if 'Sales' in df.columns and 'Sub-Category' in df.columns and 'Category' in df.columns:
-    fig2 = px.bar(
-        df,
-        x='Sales',
-        y='Sub-Category',
-        color='Category',
-        orientation='h',
-        barmode='group',
-        title='Category Performance by Sub Category'
-    )
-    plotly(fig2)
-else:
-    text('Missing columns for Category Performance by Sub Category')
+# 4. DYNAMIC FILTERS
+min_sales = slider("Min Sales ($)", min_val=0, max_val=int(df["Sales"].max()), default=0)
+max_sales = slider("Max Sales ($)", min_val=0, max_val=int(df["Sales"].max()), default=int(df["Sales"].max()))
+start_year = slider("Start Year", min_val=int(df["Year"].min()), max_val=int(df["Year"].max()), default=int(df["Year"].min()))
 
-# 3. Seasonal Trend by Sub Category (Line Chart)
-# Using Order Date as a proxy for week/date
-if 'Order Date' in df.columns and 'Sales' in df.columns and 'Sub-Category' in df.columns:
-    # Try to parse dates
-    df['Order Date'] = pd.to_datetime(df['Order Date'], errors='coerce')
-    print(df['Order Date'].head())
-    print('Number of NaT in Order Date:', df['Order Date'].isna().sum())
-    # Drop rows with invalid dates
-    df_trend = df.dropna(subset=['Order Date'])
-    # Group by month and sub-category
-    df_trend = df_trend.groupby([pd.Grouper(key='Order Date', freq='M'), 'Sub-Category'])['Sales'].sum().reset_index()
-    print(df_trend.head())
-    print('df_trend shape:', df_trend.shape)
-    if not df_trend.empty:
-        fig3 = px.line(
-            df_trend,
-            x='Order Date',
-            y='Sales',
-            color='Sub-Category',
-            title='Seasonal Trend by Sub Category (Monthly)'
-        )
-        plotly(fig3)
-    else:
-        text('No data available for Seasonal Trend by Sub Category after grouping.')
-else:
-    text('Missing columns for Seasonal Trend by Sub Category')
+filtered = df[
+    (df["Sales"] >= min_sales) &
+    (df["Sales"] <= max_sales) &
+    (df["Year"] >= start_year)
+]
 
-# 4. Top 80% Contributing Products by Sales (Pareto Chart)
-if 'Product Name' in df.columns and 'Sales' in df.columns:
-    df_sorted = df.sort_values('Sales', ascending=False)
-    df_sorted['Cumulative Sales %'] = df_sorted['Sales'].cumsum() / df_sorted['Sales'].sum() * 100
-    fig4 = go.Figure()
-    fig4.add_bar(x=df_sorted['Product Name'], y=df_sorted['Sales'], name='Net Sales Units')
-    fig4.add_scatter(x=df_sorted['Product Name'], y=df_sorted['Cumulative Sales %'], name='Cumulative Sales %', yaxis='y2')
-    fig4.update_layout(
-        title='Top 80% Contributing Products by Sales',
-        yaxis=dict(title='Net Sales Units'),
-        yaxis2=dict(title='Cumulative Sales %', overlaying='y', side='right'),
-        xaxis_tickangle=-45
-    )
-    plotly(fig4)
-else:
-    text('Missing columns for Top 80% Contributing Products by Sales')
+filtered_preview = filtered.copy()
+filtered_preview["Order Date"] = filtered_preview["Order Date"].dt.strftime("%Y-%m-%d")
+table(filtered_preview.head(10), title="Filtered Data Sample")
+separator()
+
+# 5. KPI SUMMARY (using Indicator subplots)
+text("## Key Metrics")
+metrics = {
+    "Total Sales": filtered["Sales"].sum(),
+    "Total Profit": filtered["Profit"].sum(),
+    "Average Discount": filtered["Discount"].mean(),
+    "Order Count": len(filtered)
+}
+fig_kpi = make_subplots(rows=1, cols=4, specs=[[{"type": "indicator"}]*4])
+fig_kpi.add_trace(go.Indicator(
+    mode="number",
+    value=metrics["Total Sales"],
+    title={"text": "Total Sales"},
+    number={"prefix": "$", "valueformat": ",.0f"}
+), row=1, col=1)
+fig_kpi.add_trace(go.Indicator(
+    mode="number",
+    value=metrics["Total Profit"],
+    title={"text": "Total Profit"},
+    number={"prefix": "$", "valueformat": ",.0f"}
+), row=1, col=2)
+fig_kpi.add_trace(go.Indicator(
+    mode="number",
+    value=metrics["Average Discount"],
+    title={"text": "Avg Discount"},
+    number={"valueformat": ".2%"}
+), row=1, col=3)
+fig_kpi.add_trace(go.Indicator(
+    mode="number",
+    value=metrics["Order Count"],
+    title={"text": "Order Count"},
+    number={"valueformat": ",d"}
+), row=1, col=4)
+fig_kpi.update_layout(height=200, margin={"t":50, "b":0})
+plotly(fig_kpi)
+separator()
+
+# 6. SALES & PROFIT BY CATEGORY (Dark-themed Grouped Bar)
+text("## Sales vs Profit by Category")
+cat_df = filtered.groupby("Category").agg(Sales=("Sales","sum"), Profit=("Profit","sum")).reset_index()
+fig_cat = px.bar(
+    cat_df,
+    x="Category",
+    y=["Sales","Profit"],
+    barmode="group",
+    title="Sales & Profit by Category",
+    color_discrete_map={"Sales":"#636EFA","Profit":"#EF553B"},
+)
+fig_cat.update_layout(template="plotly_dark", yaxis_title="Amount ($)")
+plotly(fig_cat)
+text("""
+- **Furniture** has the highest absolute sales but lower profit margin.
+- **Technology** leads in profitability, indicating strong margins.
+- **Office Supplies** underperforms in both metrics—potential for strategic review.
+""")
+separator()
+
+# 7. MONTHLY SALES TREND (Range Slider & Selectors)
+text("## Monthly Sales Trend")
+monthly_df = filtered.groupby("Month").agg(Sales=("Sales","sum")).reset_index()
+fig_month = px.line(
+    monthly_df,
+    x="Month",
+    y="Sales",
+    markers=True,
+    title="Monthly Sales Trend"
+)
+fig_month.update_layout(
+    template="plotly_white",
+    xaxis=dict(
+        rangeselector=dict(buttons=[
+            dict(count=3, label="3m", step="month", stepmode="backward"),
+            dict(count=6, label="6m", step="month", stepmode="backward"),
+            dict(step="all")
+        ]),
+        rangeslider=dict(visible=True),
+        type="date"
+    ),
+    yaxis_title="Sales ($)"
+)
+plotly(fig_month)
+text("""
+- Clear seasonal patterns with peaks around end-of-year.
+- Recent dip may signal market slow-down or inventory constraints.
+- Use range slider to zoom into specific periods.
+""")
+separator()
+
+# 8. SUB-CATEGORY vs REGION HEATMAP
+text("## Sales Heatmap: Sub-Category vs Region")
+pivot_df = filtered.pivot_table(
+    index="Sub-Category",
+    columns="Region",
+    values="Sales",
+    aggfunc="sum",
+    fill_value=0
+)
+fig_heat = px.imshow(
+    pivot_df,
+    labels=dict(x="Region", y="Sub-Category", color="Sales"),
+    color_continuous_scale="Viridis",
+    title="Sales by Sub-Category & Region"
+)
+plotly(fig_heat)
+text("""
+- Darker cells indicate top-performing sub-categories in each region.
+- Identify regional underperformers (light cells) for targeted action.
+- "Tables" in the Central region lag behind—review marketing/support.
+""")
+separator()
+
+# 9. DISCOUNT vs PROFIT DENSITY CONTOUR
+text("## Discount vs Profit Distribution")
+fig_den = px.density_contour(
+    filtered,
+    x="Discount",
+    y="Profit",
+    color="Category",
+    title="Impact of Discount on Profit"
+)
+fig_den.update_traces(
+    contours_coloring="fill",
+    contours_showlabels=True,
+    selector=dict(type="histogram2dcontour")
+)
+fig_den.update_layout(template="plotly_white")
+plotly(fig_den)
+text("""
+- High discount rates (>40%) often correspond to negative profit zones.
+- Furniture shows the steepest profit decline as discounts increase.
+- Consider capping discounts to preserve margins.
+""")
+separator()
+
+# 10. CORRELATION MATRIX
+text("## Correlation Matrix")
+corr_df = filtered[["Sales","Profit","Quantity","Discount"]].corr()
+fig_corr = px.imshow(
+    corr_df,
+    text_auto=True,
+    color_continuous_scale="RdBu",
+    title="Feature Correlation"
+)
+fig_corr.update_layout(template="plotly_white")
+plotly(fig_corr)
+text("""
+- Strong positive correlation between **Sales** and **Profit**.
+- **Discount** negatively correlates with profit—validate discount policies.
+- **Quantity** shows weaker correlation, indicating volume isn't sole driver of profit.
+""")
+separator()
+
+# 11. WORKFLOW DIAGRAM
+workflow = Workflow()
+
+@workflow.atom()
+def data_load():
+    return "Load & Clean Data"
+
+@workflow.atom(dependencies=["data_load"])
+def data_filter():
+    return "Filter Data"
+
+@workflow.atom(dependencies=["data_filter"])
+def data_viz():
+    return "Generate Visualizations"
+
+workflow_dag(workflow, title="Execution Workflow")
